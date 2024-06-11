@@ -334,109 +334,41 @@ class Loca_OT_create_locators_RT(Operator):
         return {'FINISHED'}
 
 
-class Loca_OT_bake_and_delete(Operator):
-    """Bake & delele all locators"""
+class Loca_OT_bake_locators(Operator):
+    """Bake bones without deleting locators"""
 
-    bl_label = 'bake_and_del_all_locators'
-    bl_idname = 'bones.bake_and_del'
+    bl_label = 'bake_locators'
+    bl_idname = 'bones.bake_locators'
     bl_options = {'REGISTER', 'UNDO'}
 
-    bake_on: BoolProperty(
-        name="bake",
-        description="Allow to bake animation for bones",
-        default=True,
-    )
-
-    def bake_range_from_locator(self, context, bone_name):
-        end_fr = context.scene.frame_end
-        armature = context.active_object.name
-        if bpy.data.objects[armature].animation_data.action:
-            for fcurve in bpy.data.objects[armature].animation_data.action.fcurves:
-                if f'{bone_name}_LOCA' in fcurve.data_path.split('"')[1]:
-                    end_fr = int(fcurve.keyframe_points[-1].co[0])
-        return end_fr
-
-    def bake(self, context, bone_name):
-        print('baking bone', bone_name)
-        armature = context.active_object
-        st_frame = context.scene.frame_start
-        end_frame = context.scene.frame_end
-        for bone in context.object.pose.bones:
-            if bone.name == bone_name:
-                bone_P = context.object.pose.bones[bone_name]
-
-                bpy.ops.pose.select_all(action='DESELECT')
-                bone = context.object.data.bones[bone_name]
-                bone.select = True
-                print('bone selected')
-                end_frame = self.bake_range_from_locator(context, bone_name)
-                if self.bake_on:
-                    bpy.ops.nla.bake(frame_start=st_frame, frame_end=end_frame, only_selected=True,
-                                     visual_keying=True, clear_constraints=False, use_current_action=True, bake_types={'POSE'})
-                    print('bone baked')
-                for constraint in bone_P.constraints:
-                    if '__Loca' in constraint.name:
-                        bone_P.constraints.remove(constraint)
-                print('deleting remaining constraints')
-                hide_scale_fcurves(armature.name, bone_name)
-
-    def deleteLocators(self, context, loc_name):
-        armature = context.active_object
-        print('deleting', loc_name)
-        for bone in armature.data.edit_bones:
-            if bone.name == loc_name:
-                armature.data.edit_bones.remove(bone)
-
-    def deleteUselessFCurves(self, context):
-        armature = context.active_object
-        if bpy.data.objects[armature.name].animation_data.action:
-            anim_fcurves = bpy.data.objects[armature.name].animation_data.action.fcurves
-            for fcurve in anim_fcurves:
-                if '_LOCA' in fcurve.data_path:
-                    anim_fcurves.remove(fcurve)
-
-
     def execute(self, context):
-        props = context.scene.loca
         armature = context.active_object
+        props = context.scene.loca
+        st_frame = props.bake_start_fr
+        end_frame = props.bake_end_fr
 
-        bones_name_list = set()
+        # Set start and end frames to scene frame range if baking_frame_range is False
+        if not props.baking_frame_range:
+            st_frame = context.scene.frame_start
+            end_frame = context.scene.frame_end
+
+        locators = []
         for bone in armature.pose.bones:
-            if '_LOCA' in bone.name:
-                bones_name_list.add(bone.name.split('_LOCA')[0])
+            if 'LOCA' in bone.name:
+                locators.append(bone.name)
 
-        for bone in bones_name_list:
-            self.bake(context, bone)
-
-        bpy.ops.object.mode_set(mode='EDIT')
-
-        locators_name_list = []
-        for bone in armature.pose.bones:
-            if '_LOCA' in bone.name:
-                locators_name_list.append(bone.name)
-
-        print('deleting locators', locators_name_list)
-        for loc in locators_name_list:
-            self.deleteLocators(context, loc)
         bpy.ops.object.mode_set(mode='POSE')
-
-        for bone in armature.data.bones:
-            if '_LOCA' in bone.name:
-                print('bone with "_LOCA"', bone.name)
-                self.deleteLocators(context, bone.name)
-
-        self.deleteUselessFCurves(context)
-
-        widget_ob = bpy.data.objects['wgt_loca']
-        bpy.data.objects.remove(widget_ob)
-
-        bones_name_list.clear()
-        locators_name_list.clear()
-        locators_RT_name_list.clear()
+        for loc in locators:
+            bpy.context.object.data.bones.active = bpy.context.object.data.bones[loc]
+            bpy.ops.nla.bake(
+                frame_start=st_frame, frame_end=end_frame,
+                only_selected=False, visual_keying=True,
+                clear_constraints=True, use_current_action=True,
+                bake_types={'POSE'}
+            )
 
         return {'FINISHED'}
-
-
+    
 class Loca_OT_bake_selected_locators(Operator):
     """Bake selected locators"""
 
@@ -455,8 +387,7 @@ class Loca_OT_bake_selected_locators(Operator):
             st_frame = context.scene.frame_start
             end_frame = context.scene.frame_end
 
-        # selected_locators = [bone.name for bone in context.selected_pose_bones if 'LOCA' in bone.name]
-        selected_locators = [bone.name.split('_LOCA')[0] for bone in context.selected_pose_bones if 'LOCA' in bone.name]
+        selected_locators = [bone.name for bone in context.selected_pose_bones if 'LOCA' in bone.name]
 
         bpy.ops.object.mode_set(mode='POSE')
         for loc in selected_locators:
@@ -469,13 +400,45 @@ class Loca_OT_bake_selected_locators(Operator):
             )
 
         return {'FINISHED'}
+    
+class Loca_OT_delete_all_locators(Operator):
+    """Delete all locators"""
 
+    bl_label = 'delete_all_locators'
+    bl_idname = 'bones.delete_all_locators'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    bake_on: BoolProperty(
+        name="bake",
+        description="Bake bones with locators",
+        default=True,
+    )
+
+    def execute(self, context):
+        armature = context.active_object
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        for bone in armature.data.edit_bones:
+            if 'LOCA' in bone.name:
+                armature.data.edit_bones.remove(bone)
+
+        bpy.ops.object.mode_set(mode='POSE')
+
+        return {'FINISHED'}
+
+    
 class Loca_OT_delete_selected_locators(Operator):
     """Delete selected locators"""
 
     bl_label = 'delete_selected_locators'
     bl_idname = 'bones.delete_selected_locators'
     bl_options = {'REGISTER', 'UNDO'}
+
+    bake_on: BoolProperty(
+        name="bake",
+        description="Bake bones with locators",
+        default=True,
+    )
 
     def delete_locators(self, context, loc_name):
         armature = context.active_object
@@ -498,6 +461,7 @@ class Loca_OT_delete_selected_locators(Operator):
         bpy.ops.object.mode_set(mode='POSE')
 
         return {'FINISHED'}
+
 
 
 class OBJECT_PT_loca(Panel):
@@ -528,12 +492,11 @@ class OBJECT_PT_loca(Panel):
                     col.separator()
                     col1 = col.column(align=True)
                     row1 = col1.row(align=True)
-                    row1.operator(Loca_OT_bake_and_delete.bl_idname,
-                                  text="bake bones & delete locators").bake_on = True
+                    row1.operator(Loca_OT_bake_locators.bl_idname,text="bake all").bake_on = True
                     row1.operator(Loca_OT_bake_selected_locators.bl_idname, text="bake selected")
                     row2 = col1.row(align=True)
-                    row2.operator(Loca_OT_bake_and_delete.bl_idname,
-                                  text="delete all").bake_on = False
+                    row2.operator(Loca_OT_delete_all_locators.bl_idname,
+                                  text="delete all").bake_on = True
                     row2.operator(Loca_OT_delete_selected_locators.bl_idname, text="delete selected")
             else:
                 col.prop(props, "select_axis", text='select local axis')
@@ -558,13 +521,13 @@ class OBJECT_PT_loca(Panel):
                 row.prop(props, "bake_end_fr")
 
 
+
 classes = [
     locaProps,
     Loca_OT_get_preview_range,
     Loca_OT_create_locators,
     Loca_OT_create_locators_RT,
-    Loca_OT_bake_and_delete,
-    Loca_OT_bake_selected_locators,
+    Loca_OT_delete_all_locators,
     Loca_OT_delete_selected_locators,
     OBJECT_PT_loca,
 ]
